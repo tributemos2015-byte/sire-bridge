@@ -1,13 +1,20 @@
-// src/db.js - Compatible con Node 18+ (usa better-sqlite3)
+// src/db.js
+// Almacena, por cada empresa/RUC (tenant), las credenciales necesarias para
+// llamar a la API del SIRE: client_id/client_secret de "Credenciales de API
+// SUNAT" y el usuario secundario SOL + Clave SOL (cifrados).
+//
+// Usa el módulo SQLite NATIVO de Node.js (node:sqlite, disponible desde
+// Node 22+) en vez de better-sqlite3, para no requerir compilación con
+// Python/Visual Studio Build Tools en Windows.
 const path = require("path");
-const Database = require("better-sqlite3");
+const { DatabaseSync } = require("node:sqlite");
 const { encrypt, decrypt } = require("./crypto");
 
 const dbPath = process.env.DB_PATH || path.join(__dirname, "..", "data", "sire.db");
 require("fs").mkdirSync(path.dirname(dbPath), { recursive: true });
 
-const db = new Database(dbPath);
-db.pragma("journal_mode = WAL");
+const db = new DatabaseSync(dbPath);
+db.exec("PRAGMA journal_mode = WAL;");
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS tenants (
@@ -20,10 +27,21 @@ db.exec(`
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
   );
+
+  CREATE TABLE IF NOT EXISTS tickets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ruc TEXT NOT NULL,
+    libro TEXT NOT NULL,
+    periodo TEXT NOT NULL,
+    num_ticket TEXT,
+    estado TEXT DEFAULT 'pendiente',
+    nombre_archivo TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
 `);
 
 function upsertTenant({ ruc, razonSocial, solUsuario, clientId, clientSecret, claveSol }) {
-  db.prepare(`
+  const stmt = db.prepare(`
     INSERT INTO tenants (ruc, razon_social, sol_usuario, client_id, client_secret_enc, clave_sol_enc, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
     ON CONFLICT(ruc) DO UPDATE SET
@@ -33,7 +51,15 @@ function upsertTenant({ ruc, razonSocial, solUsuario, clientId, clientSecret, cl
       client_secret_enc = excluded.client_secret_enc,
       clave_sol_enc = excluded.clave_sol_enc,
       updated_at = datetime('now')
-  `).run(ruc, razonSocial || null, solUsuario, clientId, encrypt(clientSecret), encrypt(claveSol));
+  `);
+  stmt.run(
+    ruc,
+    razonSocial || null,
+    solUsuario,
+    clientId,
+    encrypt(clientSecret),
+    encrypt(claveSol)
+  );
 }
 
 function getTenant(ruc) {
@@ -58,11 +84,17 @@ function deleteTenant(ruc) {
 }
 
 function saveTicket({ ruc, libro, periodo, numTicket }) {
-  return db.prepare(`INSERT INTO tickets (ruc, libro, periodo, num_ticket) VALUES (?, ?, ?, ?)`).run(ruc, libro, periodo, numTicket).lastInsertRowid;
+  const stmt = db.prepare(`
+    INSERT INTO tickets (ruc, libro, periodo, num_ticket) VALUES (?, ?, ?, ?)
+  `);
+  const info = stmt.run(ruc, libro, periodo, numTicket);
+  return info.lastInsertRowid;
 }
 
 function updateTicket(id, { estado, nombreArchivo }) {
-  db.prepare(`UPDATE tickets SET estado = ?, nombre_archivo = ? WHERE id = ?`).run(estado, nombreArchivo || null, id);
+  db.prepare(`
+    UPDATE tickets SET estado = ?, nombre_archivo = ? WHERE id = ?
+  `).run(estado, nombreArchivo || null, id);
 }
 
 module.exports = { upsertTenant, getTenant, listTenants, deleteTenant, saveTicket, updateTicket };
