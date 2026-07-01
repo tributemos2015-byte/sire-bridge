@@ -3,19 +3,15 @@
 // llamar a la API del SIRE: client_id/client_secret de "Credenciales de API
 // SUNAT" y el usuario secundario SOL + Clave SOL (cifrados).
 //
-// Usa el módulo SQLite NATIVO de Node.js (node:sqlite, disponible desde
-// Node 22+) en vez de better-sqlite3, para no requerir compilación con
-// Python/Visual Studio Build Tools en Windows.
+// Usa better-sqlite3 (en vez de node:sqlite, que es experimental y no está
+// disponible como builtin estable en todos los runtimes, incluido Render).
 const path = require("path");
-const { DatabaseSync } = require("node:sqlite");
+const Database = require("better-sqlite3");
 const { encrypt, decrypt } = require("./crypto");
-
 const dbPath = process.env.DB_PATH || path.join(__dirname, "..", "data", "sire.db");
 require("fs").mkdirSync(path.dirname(dbPath), { recursive: true });
-
-const db = new DatabaseSync(dbPath);
+const db = new Database(dbPath);
 db.exec("PRAGMA journal_mode = WAL;");
-
 db.exec(`
   CREATE TABLE IF NOT EXISTS tenants (
     ruc TEXT PRIMARY KEY,
@@ -27,7 +23,6 @@ db.exec(`
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
   );
-
   CREATE TABLE IF NOT EXISTS tickets (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ruc TEXT NOT NULL,
@@ -39,7 +34,6 @@ db.exec(`
     created_at TEXT DEFAULT (datetime('now'))
   );
 `);
-
 function upsertTenant({ ruc, razonSocial, solUsuario, clientId, clientSecret, claveSol }) {
   const stmt = db.prepare(`
     INSERT INTO tenants (ruc, razon_social, sol_usuario, client_id, client_secret_enc, clave_sol_enc, updated_at)
@@ -61,7 +55,6 @@ function upsertTenant({ ruc, razonSocial, solUsuario, clientId, clientSecret, cl
     encrypt(claveSol)
   );
 }
-
 function getTenant(ruc) {
   const row = db.prepare("SELECT * FROM tenants WHERE ruc = ?").get(ruc);
   if (!row) return null;
@@ -74,15 +67,12 @@ function getTenant(ruc) {
     claveSol: decrypt(row.clave_sol_enc),
   };
 }
-
 function listTenants() {
   return db.prepare("SELECT ruc, razon_social, sol_usuario, updated_at FROM tenants ORDER BY ruc").all();
 }
-
 function deleteTenant(ruc) {
   db.prepare("DELETE FROM tenants WHERE ruc = ?").run(ruc);
 }
-
 function saveTicket({ ruc, libro, periodo, numTicket }) {
   const stmt = db.prepare(`
     INSERT INTO tickets (ruc, libro, periodo, num_ticket) VALUES (?, ?, ?, ?)
@@ -90,11 +80,9 @@ function saveTicket({ ruc, libro, periodo, numTicket }) {
   const info = stmt.run(ruc, libro, periodo, numTicket);
   return info.lastInsertRowid;
 }
-
 function updateTicket(id, { estado, nombreArchivo }) {
   db.prepare(`
     UPDATE tickets SET estado = ?, nombre_archivo = ? WHERE id = ?
   `).run(estado, nombreArchivo || null, id);
 }
-
 module.exports = { upsertTenant, getTenant, listTenants, deleteTenant, saveTicket, updateTicket };
