@@ -25,8 +25,12 @@ const ENDPOINTS = {
     consultarPeriodos: `${SIRE_BASE}/contribuyente/migeigv/libros/rvierce/padron/web/omisos/${COD_LIBRO.compras}/periodos`,
   },
   ventas: {
+    // Segun Manual de Servicios Web Api SIRE Ventas v22, seccion 5.18
+    // "Servicio Web Api descargar propuesta" (RVIE), el nombre del
+    // endpoint es "exportapropuesta" (distinto al de compras/RCE, que
+    // usa "exportacioncomprobantepropuesta").
     descargarPropuesta: (perTributario) =>
-      `${SIRE_BASE}/contribuyente/migeigv/libros/rvie/propuesta/web/propuesta/${perTributario}/exportacioncomprobantepropuesta`,
+      `${SIRE_BASE}/contribuyente/migeigv/libros/rvie/propuesta/web/propuesta/${perTributario}/exportapropuesta`,
     consultarTicket: `${SIRE_BASE}/contribuyente/migeigv/libros/rvierce/gestionprocesosmasivos/web/masivo/consultaestadotickets`,
     descargarArchivo: `${SIRE_BASE}/contribuyente/migeigv/libros/rvierce/gestionprocesosmasivos/web/masivo/archivoreporte`,
     consultarPeriodos: `${SIRE_BASE}/contribuyente/migeigv/libros/rvierce/padron/web/omisos/${COD_LIBRO.ventas}/periodos`,
