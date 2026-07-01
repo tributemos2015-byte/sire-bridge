@@ -1,15 +1,11 @@
 // src/crypto.js
 const crypto = require("crypto");
-
 const ALGO = "aes-256-gcm";
 
 function getMasterKey() {
   const raw = process.env.MASTER_KEY;
   if (!raw || raw.length < 32) {
-    throw new Error(
-      "MASTER_KEY no definida o demasiado corta. Define una variable de entorno " +
-      "MASTER_KEY de al menos 32 caracteres."
-    );
+    throw new Error("MASTER_KEY no definida o demasiado corta. Define una variable de entorno MASTER_KEY de al menos 32 caracteres.");
   }
   return crypto.createHash("sha256").update(raw).digest();
 }
