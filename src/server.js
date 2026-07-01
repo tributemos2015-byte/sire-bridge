@@ -58,12 +58,6 @@ function validarLibro(req, res, next) {
   }
   next();
 }
-function validarPeriodo(req, res, next) {
-  if (!/^\d{6}$/.test(req.params.periodo)) {
-    return res.status(400).json({ error: "Periodo invalido. Formato esperado: AAAAMM (ej. 202506)." });
-  }
-  next();
-}
 // Nunca devolvemos client_secret ni clave_sol descifrados por HTTP.
 function tenantSeguro(t) {
   if (!t) return null;
@@ -129,20 +123,27 @@ app.get("/api/sire/:ruc/:libro/periodos", validarLibro, async (req, res) => {
   }
 });
 
-app.post("/api/sire/:ruc/:libro/:periodo/descargar", validarLibro, validarPeriodo, async (req, res) => {
-  const { ruc, libro, periodo } = req.params;
+// Contrato esperado por el frontend de ContaSol (ver sireBridgeConfig /
+// obtenerPropuestaDeSunat en el HTML): POST /api/sire/:libro/propuesta con
+// { ruc, periodo } en el body, y respuesta JSON { contenidoTxt, nombreArchivo }.
+app.post("/api/sire/:libro/propuesta", validarLibro, async (req, res) => {
+  const { libro } = req.params;
+  const { ruc, periodo } = req.body || {};
+  if (!ruc || !/^\d{11}$/.test(ruc)) {
+    return res.status(400).json({ error: "RUC invalido, debe tener 11 digitos." });
+  }
+  if (!periodo || !/^\d{6}$/.test(periodo)) {
+    return res.status(400).json({ error: "Periodo invalido. Formato esperado: AAAAMM (ej. 202506)." });
+  }
+
   const tenant = db.getTenant(ruc);
-  if (!tenant) return res.status(404).json({ error: "Tenant no encontrado." });
+  if (!tenant) return res.status(404).json({ error: "Tenant no encontrado. Registra primero sus credenciales." });
 
   const ticketId = db.saveTicket({ ruc, libro, periodo, numTicket: null });
   try {
     const resultado = await sire.descargarPropuestaCompleta(tenant, libro, periodo);
     db.updateTicket(ticketId, { estado: "terminado", nombreArchivo: resultado.nombreArchivo });
-    res
-      .status(200)
-      .set("Content-Disposition", `attachment; filename="${resultado.nombreArchivo}"`)
-      .type("text/plain")
-      .send(resultado.contenidoTxt);
+    res.json({ contenidoTxt: resultado.contenidoTxt, nombreArchivo: resultado.nombreArchivo });
   } catch (err) {
     console.error("Error descargando propuesta:", err.message);
     db.updateTicket(ticketId, { estado: "error" });
