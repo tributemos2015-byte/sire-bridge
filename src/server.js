@@ -1,5 +1,5 @@
 // src/server.js
-require("dotenv").config();
+try { require("dotenv").config(); } catch (e) { console.log("dotenv no disponible, usando variables de entorno del sistema."); }
 const express = require("express");
 const cors = require("cors");
 const rateLimit = require("express-rate-limit");
