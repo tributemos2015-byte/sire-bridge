@@ -241,7 +241,10 @@ async function descargarPropuestaCompleta(credenciales, libro, periodo) {
     entries.find((e) => e.entryName === archivo.nomArchivoContenido) ||
     entries.find((e) => e.entryName.toLowerCase().endsWith(".txt"));
   if (!txtEntry) throw new Error("El ZIP descargado no contiene un archivo .txt reconocible.");
-  const contenidoTxt = txtEntry.getData().toString("latin1");
+  // SUNAT entrega el TXT en UTF-8 (a veces con BOM). Decodificarlo como
+  // latin1 corrompe tildes/ñ y agrega caracteres basura al inicio del
+  // archivo (ej. "Ruc" -> "ï»¿Ruc"). Se usa utf8 y se retira el BOM si existe.
+  const contenidoTxt = txtEntry.getData().toString("utf8").replace(/^\uFEFF/, "");
 
   return { numTicket, nombreArchivo: archivo.nomArchivoContenido || txtEntry.entryName, contenidoTxt };
 }
