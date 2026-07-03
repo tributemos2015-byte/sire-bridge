@@ -1,7 +1,10 @@
 // src/db.js
 // Almacena, por cada empresa/RUC (tenant), las credenciales necesarias para
 // llamar a la API del SIRE: client_id/client_secret de "Credenciales de API
-// SUNAT" y el usuario secundario SOL + Clave SOL (cifrados).
+// SUNAT" y el usuario secundario SOL + Clave SOL (cifrados). Tambien
+// almacena, opcionalmente, un segundo par client_id/client_secret para la
+// API de "Consulta Integrada de Validez de Comprobante de Pago" (distinta
+// del SIRE, se genera en un menu aparte de SUNAT segun su propio manual).
 //
 // Usa better-sqlite3 (en vez de node:sqlite, que es experimental y no está
 // disponible como builtin estable en todos los runtimes, incluido Render).
@@ -34,16 +37,24 @@ db.exec(`
     created_at TEXT DEFAULT (datetime('now'))
   );
 `);
-function upsertTenant({ ruc, razonSocial, solUsuario, clientId, clientSecret, claveSol }) {
+// Migracion segura: agrega las columnas de credenciales de Validez de CP
+// si la tabla ya existia sin ellas (ALTER TABLE no soporta "IF NOT EXISTS"
+// en todas las versiones de SQLite, por eso se envuelve en try/catch).
+try { db.exec("ALTER TABLE tenants ADD COLUMN client_id_validacion TEXT"); } catch (e) {}
+try { db.exec("ALTER TABLE tenants ADD COLUMN client_secret_validacion_enc TEXT"); } catch (e) {}
+
+function upsertTenant({ ruc, razonSocial, solUsuario, clientId, clientSecret, claveSol, clientIdValidacion, clientSecretValidacion }) {
   const stmt = db.prepare(`
-    INSERT INTO tenants (ruc, razon_social, sol_usuario, client_id, client_secret_enc, clave_sol_enc, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+    INSERT INTO tenants (ruc, razon_social, sol_usuario, client_id, client_secret_enc, clave_sol_enc, client_id_validacion, client_secret_validacion_enc, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
     ON CONFLICT(ruc) DO UPDATE SET
       razon_social = excluded.razon_social,
       sol_usuario = excluded.sol_usuario,
       client_id = excluded.client_id,
       client_secret_enc = excluded.client_secret_enc,
       clave_sol_enc = excluded.clave_sol_enc,
+      client_id_validacion = excluded.client_id_validacion,
+      client_secret_validacion_enc = excluded.client_secret_validacion_enc,
       updated_at = datetime('now')
   `);
   stmt.run(
@@ -52,7 +63,9 @@ function upsertTenant({ ruc, razonSocial, solUsuario, clientId, clientSecret, cl
     solUsuario,
     clientId,
     encrypt(clientSecret),
-    encrypt(claveSol)
+    encrypt(claveSol),
+    clientIdValidacion || null,
+    clientSecretValidacion ? encrypt(clientSecretValidacion) : null
   );
 }
 function getTenant(ruc) {
@@ -65,6 +78,8 @@ function getTenant(ruc) {
     clientId: row.client_id,
     clientSecret: decrypt(row.client_secret_enc),
     claveSol: decrypt(row.clave_sol_enc),
+    clientIdValidacion: row.client_id_validacion || null,
+    clientSecretValidacion: row.client_secret_validacion_enc ? decrypt(row.client_secret_validacion_enc) : null,
   };
 }
 function listTenants() {
