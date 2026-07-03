@@ -4,6 +4,7 @@ const express = require("express");
 const cors = require("cors");
 const db = require("./db");
 const sire = require("./sireClient");
+const validezCP = require("./validezClient");
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));
@@ -61,17 +62,23 @@ function validarLibro(req, res, next) {
 // Nunca devolvemos client_secret ni clave_sol descifrados por HTTP.
 function tenantSeguro(t) {
   if (!t) return null;
-  return { ruc: t.ruc, razonSocial: t.razonSocial, solUsuario: t.solUsuario, clientId: t.clientId };
+  return {
+    ruc: t.ruc,
+    razonSocial: t.razonSocial,
+    solUsuario: t.solUsuario,
+    clientId: t.clientId,
+    tieneValidacionCP: !!(t.clientIdValidacion && t.clientSecretValidacion),
+  };
 }
 
 // ---------- Tenants (empresas/RUC registrados) ----------
 app.post("/api/tenants", (req, res) => {
-  const { ruc, razonSocial, solUsuario, clientId, clientSecret, claveSol } = req.body || {};
+  const { ruc, razonSocial, solUsuario, clientId, clientSecret, claveSol, clientIdValidacion, clientSecretValidacion } = req.body || {};
   if (!ruc || !solUsuario || !clientId || !clientSecret || !claveSol) {
     return res.status(400).json({ error: "Campos requeridos: ruc, solUsuario, clientId, clientSecret, claveSol." });
   }
   try {
-    db.upsertTenant({ ruc, razonSocial, solUsuario, clientId, clientSecret, claveSol });
+    db.upsertTenant({ ruc, razonSocial, solUsuario, clientId, clientSecret, claveSol, clientIdValidacion, clientSecretValidacion });
     res.json({ ok: true, ruc });
   } catch (err) {
     console.error("Error guardando tenant:", err);
@@ -148,6 +155,41 @@ app.post("/api/sire/:libro/propuesta", validarLibro, async (req, res) => {
     console.error("Error descargando propuesta:", err.message);
     db.updateTicket(ticketId, { estado: "error" });
     res.status(502).json({ error: "No se pudo completar la descarga desde SUNAT.", detalle: err.message });
+  }
+});
+
+// ---------- Validez de Comprobante de Pago (API distinta al SIRE) ----------
+// Contrato: POST /api/sunat/:ruc/validar-comprobantes con
+// { comprobantes: [{ ref, rucEmisor, codComp, numeroSerie, numero, fechaEmision, monto }, ...] }
+// Requiere que el tenant tenga configuradas sus credenciales de la API de
+// "Consulta de Validez de Comprobantes de Pago" (distintas a las del SIRE).
+app.post("/api/sunat/:ruc/validar-comprobantes", async (req, res) => {
+  const { ruc } = req.params;
+  const { comprobantes } = req.body || {};
+  if (!Array.isArray(comprobantes) || comprobantes.length === 0) {
+    return res.status(400).json({ error: "Envia un array 'comprobantes' con al menos un elemento." });
+  }
+  if (comprobantes.length > 100) {
+    return res.status(400).json({ error: "Maximo 100 comprobantes por lote." });
+  }
+  const tenant = db.getTenant(ruc);
+  if (!tenant) return res.status(404).json({ error: "Tenant no encontrado. Registra primero sus credenciales." });
+  if (!tenant.clientIdValidacion || !tenant.clientSecretValidacion) {
+    return res.status(400).json({
+      error: "Este RUC no tiene configuradas las credenciales de la API de Validez de Comprobante de Pago (son distintas a las del SIRE). Registralas primero en 'Credenciales SUNAT'.",
+    });
+  }
+  try {
+    const resultados = await validezCP.validarComprobantesLote({
+      clientId: tenant.clientIdValidacion,
+      clientSecret: tenant.clientSecretValidacion,
+      rucConsultante: ruc,
+      comprobantes,
+    });
+    res.json({ resultados });
+  } catch (err) {
+    console.error("Error validando comprobantes:", err.message);
+    res.status(502).json({ error: "No se pudo completar la validacion con SUNAT.", detalle: err.message });
   }
 });
 
